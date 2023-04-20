@@ -1,4 +1,4 @@
-module Stars exposing (run)
+module GenerateDecoder exposing (run)
 
 import BackendTask exposing (BackendTask)
 import BackendTask.Custom
