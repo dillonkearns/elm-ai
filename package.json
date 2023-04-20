@@ -15,6 +15,7 @@
     "vite": "^4.1.1"
   },
   "dependencies": {
-    "@netlify/functions": "^1.2.0"
+    "@netlify/functions": "^1.2.0",
+    "elm-test": "^0.19.1-revision12"
   }
 }
