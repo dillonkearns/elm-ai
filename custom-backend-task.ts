@@ -75,10 +75,9 @@ andMap = Decode.map2 (|>)
 
     testRun.on("close", (code) => {
       if (code === 0) {
-        resolve("Success!");
+        resolve(null);
       } else {
-        // resolve(`Error! ${output}`);
-        throw output;
+        resolve(`${output}`);
       }
     });
   });

@@ -61,8 +61,8 @@ postDecoder =
         )
 
 
-completions : { systemMessage : String, userMessage : String } -> BackendTask FatalError String
-completions { systemMessage, userMessage } =
+completions : { systemMessage : String, userMessage : String, history : List { badAttempt : String, errorMessage : String } } -> BackendTask FatalError String
+completions { systemMessage, userMessage, history } =
     BackendTask.Env.expect "OPENAI_API_KEY"
         |> BackendTask.allowFatal
         |> BackendTask.andThen
@@ -79,15 +79,36 @@ completions { systemMessage, userMessage } =
                                 [ ( "model", Encode.string "gpt-4" )
                                 , ( "messages"
                                   , Encode.list identity
-                                        [ --Encode.object
-                                          --    [ ( "role", Encode.string "system" )
-                                          --    , ( "content", Encode.string systemMessage )
-                                          --    ]
-                                          Encode.object
-                                            [ ( "role", Encode.string "user" )
-                                            , ( "content", Encode.string (systemMessage ++ userMessage) )
-                                            ]
-                                        ]
+                                        ([ --Encode.object
+                                           --    [ ( "role", Encode.string "system" )
+                                           --    , ( "content", Encode.string systemMessage )
+                                           --    ]
+                                           [ Encode.object
+                                                [ ( "role", Encode.string "user" )
+                                                , ( "content", Encode.string (systemMessage ++ userMessage) )
+                                                ]
+                                           ]
+                                         , history
+                                            |> List.concatMap
+                                                (\justHistory ->
+                                                    [ Encode.object
+                                                        [ ( "role", Encode.string "assistant" )
+                                                        , ( "content", Encode.string justHistory.badAttempt )
+                                                        ]
+                                                    , Encode.object
+                                                        [ ( "role", Encode.string "user" )
+                                                        , ( "content"
+                                                          , Encode.string
+                                                                ("The result you provided gave the following error from either the Elm compiler or running elm-test with the JSON Decoder provided. Please provide a new response in the same JSON format as the previous response. It is important that nothing other than JSON is provided in your response. Do not include any preamble text or apology, only a JSON response in the same format as before, but with a fix for the error below:\n\n"
+                                                                    ++ justHistory.errorMessage
+                                                                )
+                                                          )
+                                                        ]
+                                                    ]
+                                                )
+                                         ]
+                                            |> List.concat
+                                        )
                                   )
                                 , ( "temperature", Encode.float 0.7 )
                                 ]
@@ -96,13 +117,6 @@ completions { systemMessage, userMessage } =
                     (BackendTask.Http.expectJson gptResponseDecoder)
                     |> BackendTask.allowFatal
             )
-
-
-
---|> BackendTask.andThen
---    (\choices ->
---        Script.log (String.join "\n" choices)
---    )
 
 
 gptResponseDecoder : Decode.Decoder String
@@ -121,11 +135,6 @@ gptResponseDecoder =
         |> Decode.map (String.join "\n")
 
 
-desiredType : String
-desiredType =
-    """type alias Post = { title : String, kind : String , published : String , ups : Int, author : String, url : String }"""
-
-
 getSampleResponse : BackendTask FatalError String
 getSampleResponse =
     BackendTask.Http.get "https://www.reddit.com/r/elm/top.json?limit=1&t=year"
@@ -133,17 +142,11 @@ getSampleResponse =
         |> BackendTask.allowFatal
 
 
-run : Script
-run =
-    Script.withCliOptions program
-        (\{ url, type_ } ->
-            BackendTask.Http.getJson url (Decode.value |> Decode.map (Encode.encode 0))
-                |> BackendTask.allowFatal
-                |> BackendTask.andThen
-                    (\sampleResponse ->
-                        completions
-                            { systemMessage =
-                                """You are an Elm developer assistant. Your job is to help people generate
+iterateWithPrompt : { a | sampleResponse : String, targetType : String, history : List { badAttempt : String, errorMessage : String } } -> BackendTask FatalError (Result { badAttempt : String, errorMessage : String } ())
+iterateWithPrompt { sampleResponse, targetType, history } =
+    completions
+        { systemMessage =
+            """You are an Elm developer assistant. Your job is to help people generate
 reliable Elm code to do JSON Decoding.
 
 You will be given the following inputs:
@@ -161,7 +164,10 @@ solution on the sample JSON input. Therefore the Decoder must handle the exact s
 produce exactly the expected value that the sample JSON input decodes into. If it doesn't, the Elm compiler or JSON decoder error messages
 will be given for you to fix them until the solution successfully yields the expected output on the sample JSON.
 
-Do NOT include the type definition in your solution. Only your Decoder definition.
+- Do NOT include the type definition in your solution. Only your Decoder definition.
+- Use the provided function `andMap` for every given field in the record type definition.
+- Never refer to `Decode.andMap`, this function does not exist.
+- DO refer to `andMap`, this function exists and is in scope.
 
 The name of the top-level JSON Decoder in your solution must be `decoder`.
 
@@ -179,11 +185,11 @@ Example JSON:
 
 Solution:
 """
-                                    ++ Encode.encode 0
-                                        (Encode.object
-                                            [ ( "elmCode"
-                                              , Encode.string
-                                                    """import Json.Decode as Decode
+                ++ Encode.encode 0
+                    (Encode.object
+                        [ ( "elmCode"
+                          , Encode.string
+                                """import Json.Decode as Decode
 
 decoder : Decoder Repo
 decoder =
@@ -192,59 +198,138 @@ decoder =
         |> andMap (Decode.field "owner" Decode.string)
         |> andMap (Decode.field "name" Decode.string)
                                             """
-                                              )
-                                            , ( "decodedElmValue"
-                                              , Encode.string
-                                                    """{ stars = 575, owner = "dillonkearns", name = "elm-pages" }"""
-                                              )
-                                            ]
-                                        )
-                            , userMessage =
-                                """
+                          )
+                        , ( "decodedElmValue"
+                          , Encode.string
+                                """{ stars = 575, owner = "dillonkearns", name = "elm-pages" }"""
+                          )
+                        ]
+                    )
+        , userMessage =
+            """
 Decode a JSON object into a record type:
 
 ```elm
 """
-                                    ++ type_
-                                    ++ """
+                ++ targetType
+                ++ """
 ```
 
 Example JSON:
 
 ```json
 """
-                                    ++ sampleResponse
-                                    ++ """
+                ++ sampleResponse
+                ++ """
 ```
 
 Solution:
 
 """
-                            }
-                            |> BackendTask.andThen
-                                (\jsonOutput ->
-                                    Script.log jsonOutput
-                                        |> BackendTask.andThen
-                                            (\_ ->
-                                                BackendTask.Custom.run "testDecoder"
-                                                    (Encode.object
-                                                        [ ( "sampleJson", Encode.string sampleResponse )
-                                                        , ( "solution", Encode.string jsonOutput )
-                                                        , ( "typeDefinition", Encode.string type_ )
-                                                        ]
-                                                    )
-                                                    Decode.string
-                                                    |> BackendTask.allowFatal
-                                                    |> BackendTask.andThen Script.log
-                                            )
+        , history = history
+        }
+        |> BackendTask.andThen
+            (\jsonOutput ->
+                Script.log jsonOutput
+                    |> BackendTask.andThen
+                        (\() ->
+                            BackendTask.Custom.run "testDecoder"
+                                (Encode.object
+                                    [ ( "sampleJson", Encode.string sampleResponse )
+                                    , ( "solution", Encode.string jsonOutput )
+                                    , ( "typeDefinition", Encode.string targetType )
+                                    ]
                                 )
+                                (Decode.nullable Decode.string
+                                    |> Decode.map
+                                        (\maybeString ->
+                                            case maybeString of
+                                                Just error ->
+                                                    Err
+                                                        { badAttempt = jsonOutput
+                                                        , errorMessage = error
+                                                        }
+
+                                                Nothing ->
+                                                    Ok ()
+                                        )
+                                )
+                                |> BackendTask.allowFatal
+                        )
+            )
+
+
+run : Script
+run =
+    Script.withCliOptions program
+        (\{ url, targetType, maxIterations } ->
+            BackendTask.Http.getJson url (Decode.value |> Decode.map (Encode.encode 0))
+                |> BackendTask.allowFatal
+                |> BackendTask.andThen
+                    (\sampleResponse ->
+                        reiterate [] sampleResponse targetType maxIterations
                     )
         )
 
 
+reiterate history sampleResponse targetType iterationsLeft =
+    iterateWithPrompt
+        { sampleResponse = sampleResponse
+        , targetType = targetType
+        , history = history
+        }
+        |> BackendTask.andThen
+            (\result ->
+                case result of
+                    Ok () ->
+                        Script.log "Success!"
+
+                    Err error ->
+                        Script.log
+                            (error.badAttempt
+                                ++ "\n\n Yielded error:\n"
+                                ++ error.errorMessage
+                                ++ "\n\nIterating on error... "
+                                ++ String.fromInt iterationsLeft
+                                ++ " iterations left."
+                            )
+                            |> BackendTask.andThen
+                                (\() ->
+                                    iterateWithPrompt
+                                        { sampleResponse = sampleResponse
+                                        , targetType = targetType
+                                        , history = [ error ]
+                                        }
+                                        |> BackendTask.andThen
+                                            (\iterationResult ->
+                                                case iterationResult of
+                                                    Ok () ->
+                                                        Script.log "Done. Success!"
+
+                                                    Err iterationError ->
+                                                        if iterationsLeft == 0 then
+                                                            Script.log
+                                                                ("Done. Failed.\n"
+                                                                    ++ iterationError.badAttempt
+                                                                    ++ "\n\n"
+                                                                    ++ iterationError.errorMessage
+                                                                )
+
+                                                        else
+                                                            reiterate
+                                                                (error :: history)
+                                                                iterationError.badAttempt
+                                                                targetType
+                                                                (iterationsLeft - 1)
+                                            )
+                                )
+            )
+
+
 type alias CliOptions =
     { url : String
-    , type_ : String
+    , targetType : String
+    , maxIterations : Int
     }
 
 
@@ -254,7 +339,13 @@ program =
         |> Program.add
             (OptionsParser.build CliOptions
                 |> OptionsParser.with
-                    (Option.optionalKeywordArg "url" |> Option.withDefault "https://api.sunrisesunset.io/json?lat=38.907192&lng=-77.036873&timezone=UTC&date=today")
+                    (Option.requiredKeywordArg "url")
                 |> OptionsParser.with
-                    (Option.optionalKeywordArg "type" |> Option.withDefault desiredType)
+                    (Option.requiredKeywordArg "type")
+                |> OptionsParser.with
+                    (Option.optionalKeywordArg "iterations"
+                        |> Option.withDefault "1"
+                        |> Option.validateMap
+                            (String.toInt >> Result.fromMaybe "Must be an integer")
+                    )
             )
