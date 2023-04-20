@@ -35,34 +35,8 @@ import Pages.Script as Script exposing (Script)
 -}
 
 
-fakeCompletions _ =
-    BackendTask.succeed
-        (Encode.object
-            [ ( "elmCode", Encode.string """import Json.Decode as Decode
-decoder : Decode.Decoder Post
-decoder =
-    Decode.field "data" (Decode.field "children" (Decode.index 0 (Decode.field "data" postDecoder)))
-
-postDecoder : Decode.Decoder Post
-postDecoder =
-    Decode.succeed Post
-        |> Decode.andMap (Decode.field "title" Decode.string)
-        |> Decode.andMap (Decode.field "kind" Decode.string)
-        |> Decode.andMap (Decode.field "created" Decode.float |> Decode.map (round >> String.fromInt))
-        |> Decode.andMap (Decode.field "ups" Decode.int)
-        |> Decode.andMap (Decode.field "author" Decode.string)
-        |> Decode.andMap (Decode.field "url" Decode.string)
-""" )
-            , ( "decodedElmValue"
-              , Encode.string """{ title = "Elm on the Backend" talk announced for GOTO Aarhus", kind = "t3", published = "1677169863", ups = 85, author = "1-more", url = "https://gotoaarhus.com/2023/sessions/2529/elm-on-the-backend" }"""
-              )
-            ]
-            |> Encode.encode 0
-        )
-
-
-completions : { systemMessage : String, userMessage : String, history : List { badAttempt : String, errorMessage : String } } -> BackendTask FatalError String
-completions { systemMessage, userMessage, history } =
+completions : { model : String, systemMessage : String, userMessage : String, history : List { badAttempt : String, errorMessage : String } } -> BackendTask FatalError String
+completions { systemMessage, userMessage, history, model } =
     BackendTask.Env.expect "OPENAI_API_KEY"
         |> BackendTask.allowFatal
         |> BackendTask.andThen
@@ -76,7 +50,7 @@ completions { systemMessage, userMessage, history } =
                     , body =
                         BackendTask.Http.jsonBody
                             (Encode.object
-                                [ ( "model", Encode.string "gpt-4" )
+                                [ ( "model", Encode.string model )
                                 , ( "messages"
                                   , Encode.list identity
                                         ([ --Encode.object
@@ -135,17 +109,11 @@ gptResponseDecoder =
         |> Decode.map (String.join "\n")
 
 
-getSampleResponse : BackendTask FatalError String
-getSampleResponse =
-    BackendTask.Http.get "https://www.reddit.com/r/elm/top.json?limit=1&t=year"
-        BackendTask.Http.expectString
-        |> BackendTask.allowFatal
-
-
-iterateWithPrompt : { a | sampleResponse : String, targetType : String, history : List { badAttempt : String, errorMessage : String } } -> BackendTask FatalError (Result { badAttempt : String, errorMessage : String } ())
-iterateWithPrompt { sampleResponse, targetType, history } =
+iterateWithPrompt : { model : String, sampleResponse : String, targetType : String, history : List { badAttempt : String, errorMessage : String } } -> BackendTask FatalError (Result { badAttempt : String, errorMessage : String } ())
+iterateWithPrompt { model, sampleResponse, targetType, history } =
     completions
-        { systemMessage =
+        { model = model
+        , systemMessage =
             """You are an Elm developer assistant. Your job is to help people generate
 reliable Elm code to do JSON Decoding.
 
@@ -262,19 +230,20 @@ Solution:
 run : Script
 run =
     Script.withCliOptions program
-        (\{ url, targetType, maxIterations } ->
+        (\{ url, targetType, maxIterations, model } ->
             BackendTask.Http.getJson url (Decode.value |> Decode.map (Encode.encode 0))
                 |> BackendTask.allowFatal
                 |> BackendTask.andThen
                     (\sampleResponse ->
-                        reiterate [] sampleResponse targetType maxIterations
+                        reiterate [] model sampleResponse targetType maxIterations
                     )
         )
 
 
-reiterate history sampleResponse targetType iterationsLeft =
+reiterate history model sampleResponse targetType iterationsLeft =
     iterateWithPrompt
-        { sampleResponse = sampleResponse
+        { model = model
+        , sampleResponse = sampleResponse
         , targetType = targetType
         , history = history
         }
@@ -296,7 +265,8 @@ reiterate history sampleResponse targetType iterationsLeft =
                             |> BackendTask.andThen
                                 (\() ->
                                     iterateWithPrompt
-                                        { sampleResponse = sampleResponse
+                                        { model = model
+                                        , sampleResponse = sampleResponse
                                         , targetType = targetType
                                         , history = [ error ]
                                         }
@@ -318,6 +288,7 @@ reiterate history sampleResponse targetType iterationsLeft =
                                                         else
                                                             reiterate
                                                                 (error :: history)
+                                                                model
                                                                 iterationError.badAttempt
                                                                 targetType
                                                                 (iterationsLeft - 1)
@@ -330,6 +301,7 @@ type alias CliOptions =
     { url : String
     , targetType : String
     , maxIterations : Int
+    , model : String
     }
 
 
@@ -347,5 +319,13 @@ program =
                         |> Option.withDefault "1"
                         |> Option.validateMap
                             (String.toInt >> Result.fromMaybe "Must be an integer")
+                    )
+                |> OptionsParser.with
+                    (Option.optionalKeywordArg "model"
+                        |> Option.withDefault "gpt-4"
+                        |> Option.oneOf "gpt-4"
+                            [ ( "gpt-4", "gpt-4" )
+                            , ( "gpt-3.5-turbo", "gpt-3.5-turbo" )
+                            ]
                     )
             )
