@@ -25,12 +25,15 @@ export async function testDecoder({ sampleJson, solution, typeDefinition }) {
           "elm/core": "1.0.5",
           "elm/json": "1.1.3",
           "elm/time": "1.0.0",
+          "rtfeldman/elm-iso8601-date-strings": "1.1.4",
+          "NoRedInk/elm-json-decode-pipeline": "1.0.1",
         },
-        indirect: {},
+        indirect: {
+          "elm/parser": "1.1.0",
+        },
       },
       "test-dependencies": {
         direct: {
-          "NoRedInk/elm-json-decode-pipeline": "1.0.1",
           "elm-explorations/test": "2.1.1",
         },
         indirect: {},
@@ -42,6 +45,7 @@ export async function testDecoder({ sampleJson, solution, typeDefinition }) {
 
 import Expect
 import Test
+import Iso8601
 import Time exposing (Posix)
 import Json.Decode exposing (Decoder)
 ${elmCode}
