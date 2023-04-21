@@ -2,15 +2,45 @@ import { spawn } from "child_process";
 import * as fs from "fs";
 import * as path from "path";
 
-export async function hello(name) {
-  return `Hello ${name}!`;
+export async function testCompilation({ elmCode }) {
+  await prepareHiddenDirectory();
+  const exampleModule = `module Example exposing (..)
+
+import Json.Decode as Decode exposing (Decoder)
+import Http
+
+
+${elmCode}
+`;
+  fs.writeFileSync("elm-stuff/elm-ai/src/Example.elm", exampleModule);
+  return await new Promise((resolve) => {
+    let testRun = spawn(
+      "elm",
+      ["make", "src/Example.elm", "--output", "/dev/null"],
+      {
+        cwd: path.resolve("elm-stuff/elm-ai"),
+        stdio: "inherit",
+      }
+    );
+    let output = "";
+    testRun.stderr?.on("data", (data) => {
+      output += data;
+    });
+    testRun.stdout?.on("data", (data) => {
+      output += data;
+    });
+
+    testRun.on("close", (code) => {
+      if (code === 0) {
+        resolve(null);
+      } else {
+        resolve(`${output}`);
+      }
+    });
+  });
 }
 
-// const solutionHardcoded = `{"elmCode":"import Json.Decode as Decode\n\ntype alias Post =\n    { title : String, kind : String , published : String , votes : Int, author : String, url : String }\n\ndecoder : Decode.Decoder Post\ndecoder =\n    Decode.succeed Post\n        |> Decode.andThen (\\_ -> Decode.field \"data\" (Decode.field \"children\" Decode.list))\n        |> Decode.andThen (Decode.index 0)\n        |> Decode.andThen (Decode.field \"data\")\n        |> Decode.andThen (\\_ -> Decode.succeed Post\n            |> Decode.andMap (Decode.field \"title\" Decode.string)\n            |> Decode.andMap (Decode.field \"kind\" (Decode.field \"kind\" Decode.string))\n            |> Decode.andMap (Decode.field \"published\" (Decode.field \"created\" Decode.float |> Decode.map String.fromFloat))\n            |> Decode.andMap (Decode.field \"votes\" (Decode.field \"ups\" Decode.int))\n            |> Decode.andMap (Decode.field \"author\" (Decode.field \"author\" Decode.string))\n            |> Decode.andMap (Decode.field \"url\" (Decode.field \"url\" Decode.string))\n        )\n","decodedElmValue":"{ title = \"\\\"Elm on the Backend\\\" talk announced for GOTO Aarhus\", kind = \"t3\", published = \"1677169863.0\", votes = 87, author = \"1-more\", url = \"https://gotoaarhus.com/2023/sessions/2529/elm-on-the-backend\" }"}`;
-
-export async function testDecoder({ sampleJson, solution, typeDefinition }) {
-  const { elmCode, decodedElmValue } = JSON.parse(solution);
-  // generate an Elm test file and run it using elm-test
+async function prepareHiddenDirectory() {
   fs.mkdirSync("elm-stuff/elm-ai/tests", { recursive: true });
   fs.mkdirSync("elm-stuff/elm-ai/src", { recursive: true });
   fs.writeFileSync(
@@ -25,6 +55,12 @@ export async function testDecoder({ sampleJson, solution, typeDefinition }) {
           "elm/core": "1.0.5",
           "elm/json": "1.1.3",
           "elm/time": "1.0.0",
+          "elm/bytes": "1.0.8",
+          "elm/file": "1.0.5",
+          "elm/http": "2.0.0",
+          "elm/html": "1.0.0",
+          "elm/random": "1.0.0",
+          "elm/virtual-dom": "1.0.3",
           "rtfeldman/elm-iso8601-date-strings": "1.1.4",
           "NoRedInk/elm-json-decode-pipeline": "1.0.1",
         },
@@ -40,7 +76,12 @@ export async function testDecoder({ sampleJson, solution, typeDefinition }) {
       },
     })
   );
+}
 
+export async function testDecoder({ sampleJson, solution, typeDefinition }) {
+  const { elmCode, decodedElmValue } = JSON.parse(solution);
+  // generate an Elm test file and run it using elm-test
+  await prepareHiddenDirectory();
   const elmTestModule = `module DecoderTest exposing (all)
 
 import Expect
