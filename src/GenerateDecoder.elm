@@ -198,32 +198,59 @@ Solution:
         }
         |> BackendTask.andThen
             (\jsonOutput ->
-                Script.log jsonOutput
-                    |> BackendTask.andThen
-                        (\() ->
-                            BackendTask.Custom.run "testDecoder"
-                                (Encode.object
-                                    [ ( "sampleJson", Encode.string sampleResponse )
-                                    , ( "solution", Encode.string jsonOutput )
-                                    , ( "typeDefinition", Encode.string targetType )
-                                    ]
+                let
+                    response : Result { badAttempt : String, errorMessage : String } Response
+                    response =
+                        Decode.decodeString responseDecoder jsonOutput
+                            |> Result.mapError
+                                (\error ->
+                                    { badAttempt = jsonOutput
+                                    , errorMessage =
+                                        "The response you provided was not formatted properly with the expected JSON format. Error: \n\n"
+                                            ++ Decode.errorToString error
+                                    }
                                 )
-                                (Decode.nullable Decode.string
-                                    |> Decode.map
-                                        (\maybeString ->
-                                            case maybeString of
-                                                Just error ->
-                                                    Err
-                                                        { badAttempt = jsonOutput
-                                                        , errorMessage = error
-                                                        }
+                in
+                case response of
+                    Err err ->
+                        BackendTask.succeed (Err err)
 
-                                                Nothing ->
-                                                    Ok ()
+                    Ok okResponse ->
+                        let
+                            formattedResponse : String
+                            formattedResponse =
+                                "-- ELM CODE --\n\n"
+                                    ++ okResponse.elmCode
+                                    ++ "\n\n-- EXPECTED DECODED VALUE --\n\n"
+                                    ++ okResponse.decodedElmValue
+                                    ++ "\n\n"
+                        in
+                        Script.log formattedResponse
+                            |> BackendTask.andThen
+                                (\() ->
+                                    BackendTask.Custom.run "testDecoder"
+                                        (Encode.object
+                                            [ ( "sampleJson", Encode.string sampleResponse )
+                                            , ( "solution", Encode.string jsonOutput )
+                                            , ( "typeDefinition", Encode.string targetType )
+                                            ]
                                         )
+                                        (Decode.nullable Decode.string
+                                            |> Decode.map
+                                                (\maybeString ->
+                                                    case maybeString of
+                                                        Just error ->
+                                                            Err
+                                                                { badAttempt = jsonOutput
+                                                                , errorMessage = error
+                                                                }
+
+                                                        Nothing ->
+                                                            Ok ()
+                                                )
+                                        )
+                                        |> BackendTask.allowFatal
                                 )
-                                |> BackendTask.allowFatal
-                        )
             )
 
 
@@ -238,6 +265,19 @@ run =
                         reiterate [] model sampleResponse targetType maxIterations
                     )
         )
+
+
+type alias Response =
+    { elmCode : String
+    , decodedElmValue : String
+    }
+
+
+responseDecoder : Decode.Decoder Response
+responseDecoder =
+    Decode.map2 Response
+        (Decode.field "elmCode" Decode.string)
+        (Decode.field "decodedElmValue" Decode.string)
 
 
 reiterate history model sampleResponse targetType iterationsLeft =
