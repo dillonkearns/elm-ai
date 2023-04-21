@@ -150,10 +150,10 @@ type alias Repo = { stars : Int , owner : String , name : String }
 Example JSON:
 
 ```json
-{ "stargazers_count": 575, "owner": "dillonkearns", "name": "elm-pages" }
+{ "stargazers_count": 575, "user": {"owner": "dillonkearns", "name": "elm-pages"} }
 ```
 
-Solution:
+Solution attempt:
 """
                 ++ Encode.encode 0
                     (Encode.object
@@ -172,6 +172,62 @@ decoder =
                         , ( "decodedElmValue"
                           , Encode.string
                                 """{ stars = 575, owner = "dillonkearns", name = "elm-pages" }"""
+                          )
+                        , ( "attemptExplanation"
+                          , Encode.string
+                                """This is the first attempt. It appears that the field `stars` in the target Elm type refers to the JSON property `stargazers_count` in the sample JSON input. Otherwise we are directly retrieving the other JSON properties."""
+                          )
+                        ]
+                    )
+                ++ """
+
+The solution attempt failed with the following error from either the Elm compiler or running elm-test with the JSON Decoder provided. Please provide a new response in the same JSON format as the previous response. It is important that nothing other than JSON is provided in your response. Do not include any preamble text or apology, only a JSON response in the same format as before, but with a fix for the error below:
+
+    Err Problem with the given value:
+
+    {
+        "stargazers_count": 575,
+        "user": {
+            "owner": "dillonkearns",
+            "name": "elm-pages"
+        }
+    }
+
+Expecting an OBJECT with a field named `name`"
+    ╷
+    │ Expect.equal
+    ╵
+    Ok { name = "elm-pages", owner = "dillonkearns", stars = 575 }
+
+
+
+TEST RUN FAILED
+
+Duration: 90 ms
+Passed:   0
+Failed:   1
+                    """
+                ++ Encode.encode 0
+                    (Encode.object
+                        [ ( "elmCode"
+                          , Encode.string
+                                """import Json.Decode as Decode
+
+decoder : Decoder Repo
+decoder =
+    Decode.succeed Repo
+        |> andMap (Decode.field "stargazers_count" Decode.int)
+        |> andMap (Decode.field "user" (Decode.field "owner" Decode.string) )
+        |> andMap (Decode.field "user" ( Decode.field "name" Decode.string) )
+"""
+                          )
+                        , ( "decodedElmValue"
+                          , Encode.string
+                                """{ stars = 575, owner = "dillonkearns", name = "elm-pages" }"""
+                          )
+                        , ( "attemptExplanation"
+                          , Encode.string
+                                """The previous attempt failed because the JSON properties `owner` and `name` are nested under `user`. In order to attempt to fix this problem, this solution changes the decoder definition. It uses `Decode.field "user" to match the nesting of the JSON."""
                           )
                         ]
                     )
@@ -193,7 +249,7 @@ Example JSON:
                 ++ """
 ```
 
-Solution:
+Solution attempt:
 
 """
         , history = history
@@ -247,6 +303,7 @@ Solution:
             )
 
 
+logFormatted : Response -> BackendTask FatalError ()
 logFormatted info =
     elmFormat
         (info.elmCode
@@ -259,7 +316,16 @@ logFormatted info =
                 let
                     formattedResponse : String
                     formattedResponse =
-                        "-- ELM CODE --\n\n"
+                        (case info.attemptExplanation of
+                            Just explanation ->
+                                "-- EXPLANATION --\n\n"
+                                    ++ Console.red explanation
+                                    ++ "\n\n"
+
+                            Nothing ->
+                                ""
+                        )
+                            ++ "-- ELM CODE --\n\n"
                             ++ elmCode
                             --++ "\n\n-- EXPECTED DECODED VALUE --\n\n"
                             --++ decodedElmValue
@@ -300,14 +366,16 @@ run =
 type alias Response =
     { elmCode : String
     , decodedElmValue : String
+    , attemptExplanation : Maybe String
     }
 
 
 responseDecoder : Decode.Decoder Response
 responseDecoder =
-    Decode.map2 Response
+    Decode.map3 Response
         (Decode.field "elmCode" Decode.string)
         (Decode.field "decodedElmValue" Decode.string)
+        (Decode.maybe (Decode.field "attemptExplanation" Decode.string))
 
 
 reiterate history model sampleResponse targetType iterationsLeft =
