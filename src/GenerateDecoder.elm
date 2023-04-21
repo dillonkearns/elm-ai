@@ -7,10 +7,12 @@ import BackendTask.Http
 import Cli.Option as Option
 import Cli.OptionsParser as OptionsParser
 import Cli.Program as Program
+import Console
 import FatalError exposing (FatalError)
 import Json.Decode as Decode
 import Json.Encode as Encode
 import Pages.Script as Script exposing (Script)
+import SyntaxHighlight
 
 
 
@@ -216,16 +218,7 @@ Solution:
                         BackendTask.succeed (Err err)
 
                     Ok okResponse ->
-                        let
-                            formattedResponse : String
-                            formattedResponse =
-                                "-- ELM CODE --\n\n"
-                                    ++ okResponse.elmCode
-                                    ++ "\n\n-- EXPECTED DECODED VALUE --\n\n"
-                                    ++ okResponse.decodedElmValue
-                                    ++ "\n\n"
-                        in
-                        Script.log formattedResponse
+                        logFormatted okResponse
                             |> BackendTask.andThen
                                 (\() ->
                                     BackendTask.Custom.run "testDecoder"
@@ -252,6 +245,43 @@ Solution:
                                         |> BackendTask.allowFatal
                                 )
             )
+
+
+logFormatted info =
+    elmFormat
+        (info.elmCode
+            ++ "\n\n"
+            ++ "expected = "
+            ++ info.decodedElmValue
+        )
+        |> BackendTask.andThen
+            (\elmCode ->
+                let
+                    formattedResponse : String
+                    formattedResponse =
+                        "-- ELM CODE --\n\n"
+                            ++ elmCode
+                            --++ "\n\n-- EXPECTED DECODED VALUE --\n\n"
+                            --++ decodedElmValue
+                            ++ "\n\n"
+                in
+                Script.log formattedResponse
+            )
+
+
+elmFormat : String -> BackendTask FatalError String
+elmFormat elmCode =
+    BackendTask.Custom.run "elmFormat"
+        (Encode.string elmCode)
+        (Decode.string
+            |> Decode.map
+                (SyntaxHighlight.elm
+                    >> Result.map (SyntaxHighlight.toConsole consoleOptions)
+                    >> Result.withDefault []
+                    >> String.join ""
+                )
+        )
+        |> BackendTask.allowFatal
 
 
 run : Script
@@ -369,3 +399,20 @@ program =
                             ]
                     )
             )
+
+
+consoleOptions : SyntaxHighlight.ConsoleOptions
+consoleOptions =
+    { highlight = Console.cyan
+    , addition = Console.green
+    , deletion = Console.red
+    , default = identity
+    , comment = Console.dark
+    , style1 = identity
+    , style2 = Console.yellow
+    , style3 = Console.magenta
+    , style4 = Console.cyan
+    , style5 = Console.green
+    , style6 = identity
+    , style7 = Console.yellow
+    }

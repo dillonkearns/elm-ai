@@ -86,3 +86,33 @@ andMap = Decode.map2 (|>)
     });
   });
 }
+
+export async function elmFormat(code) {
+  return await new Promise((resolve, reject) => {
+    console.log("CODE", code);
+    let testRun = spawn("elm-format", ["--stdin"]);
+    let output = "";
+    testRun.stdout.on("data", (data) => {
+      output += data;
+    });
+    testRun.stderr.on("data", (data) => {
+      output += data;
+    });
+    testRun.on("close", (code) => {
+      if (code === 0) {
+        resolve(output);
+      } else {
+        reject(output);
+      }
+    });
+    testRun.on("exit", (code) => {
+      if (code === 0) {
+        resolve(output);
+      } else {
+        reject(output);
+      }
+    });
+    testRun.stdin.write(code);
+    testRun.stdin.end();
+  });
+}
