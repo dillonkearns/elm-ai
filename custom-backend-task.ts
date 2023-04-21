@@ -89,7 +89,6 @@ andMap = Decode.map2 (|>)
 
 export async function elmFormat(code) {
   return await new Promise((resolve, reject) => {
-    console.log("CODE", code);
     let testRun = spawn("elm-format", ["--stdin"]);
     let output = "";
     testRun.stdout.on("data", (data) => {
