@@ -265,6 +265,7 @@ responseDecoder =
         (Decode.maybe (Decode.field "attemptExplanation" Decode.string))
 
 
+reiterate : List { badAttempt : String, errorMessage : String } -> String -> String -> String -> Int -> BackendTask FatalError ()
 reiterate history model sampleResponse targetType iterationsLeft =
     iterateWithPrompt
         { model = model
