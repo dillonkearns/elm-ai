@@ -47,21 +47,20 @@ import Expect
 import Test
 import Iso8601
 import Time exposing (Posix)
-import Json.Decode exposing (Decoder)
+import Json.Decode as Decode exposing (Decoder)
 ${elmCode}
 
 all : Test.Test
 all =
     Test.test "decoder test" <| \\_ ->
-        Json.Decode.decodeString decoder ${JSON.stringify(sampleJson)}
+        Decode.decodeString decoder ${JSON.stringify(sampleJson)}
+        |> Result.mapError Decode.errorToString
         |> Expect.equal (Ok ${decodedElmValue}
         )
 
 ${typeDefinition}
 
 andMap = Decode.map2 (|>)
-
-
 `;
   fs.writeFileSync("elm-stuff/elm-ai/tests/DecoderTest.elm", elmTestModule);
   return await new Promise((resolve) => {
