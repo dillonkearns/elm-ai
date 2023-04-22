@@ -1,8 +1,8 @@
 module TransplantTest exposing (all)
 
-import Transplant exposing (rule)
 import Review.Test
 import Test exposing (Test, describe, test)
+import Transplant exposing (rule)
 
 
 all : Test
@@ -11,21 +11,26 @@ all =
         [ test "should not report an error when REPLACEME" <|
             \() ->
                 """module A exposing (..)
-a = 1
+
+a =
+    let
+        b : Int -> Int -> Int
+        b =
+            Debug.todo "REPLACE"
+    in
+    1
 """
                     |> Review.Test.run rule
-                    |> Review.Test.expectNoErrors
-        , test "should report an error when REPLACEME" <|
-            \() ->
-                """module A exposing (..)
-a = 1
+                    |> Review.Test.expectDataExtract """
+{
+ "A": [
+ {
+ "row": 9,
+ "column": 9,
+ "type": "Int -> (Int -> Int)"
+ }
+]
+}
+
 """
-                    |> Review.Test.run rule
-                    |> Review.Test.expectErrors
-                        [ Review.Test.error
-                            { message = "REPLACEME"
-                            , details = [ "REPLACEME" ]
-                            , under = "REPLACEME"
-                            }
-                        ]
         ]
