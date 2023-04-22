@@ -2,6 +2,7 @@ module Main exposing (..)
 
 import Dict
 import Http
+import Json.Decode as Decode
 
 
 foo : String
