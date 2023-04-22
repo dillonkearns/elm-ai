@@ -51,6 +51,7 @@ stepsDecoder =
             )
 
 
+initialInput : { snippet : String, availableFunctions : List { moduleName : String, exposed : List ( String, String ) } }
 initialInput =
     { snippet = """import Json.Decode as Decode
 
