@@ -6,6 +6,7 @@ import BackendTask.Http
 import FatalError exposing (FatalError)
 import Json.Decode as Decode exposing (Decoder)
 import Json.Encode as Encode
+import Pages.Script as Script
 
 
 {-| Call OpenAI API using the equivalent of this cURL command:
@@ -24,8 +25,11 @@ curl <https://api.openai.com/v1/chat/completions>
 -}
 completions : { model : String, systemMessage : String, userMessage : String, history : List { badAttempt : String, errorMessage : String } } -> BackendTask FatalError String
 completions { systemMessage, userMessage, history, model } =
-    BackendTask.Env.expect "OPENAI_API_KEY"
-        |> BackendTask.allowFatal
+    BackendTask.map2 (\response () -> response)
+        (BackendTask.Env.expect "OPENAI_API_KEY"
+            |> BackendTask.allowFatal
+        )
+        (Script.log "Calling OpenAI API...")
         |> BackendTask.andThen
             (\apiKey ->
                 BackendTask.Http.request
