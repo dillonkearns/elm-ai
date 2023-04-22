@@ -2,7 +2,6 @@ module TypeSolver exposing (run)
 
 import BackendTask exposing (BackendTask)
 import BackendTask.Custom
-import BackendTask.Http
 import Cli.Option as Option
 import Cli.OptionsParser as OptionsParser
 import Cli.Program as Program
@@ -54,6 +53,7 @@ stepsDecoder =
 initialInput : { snippet : String, availableFunctions : List { moduleName : String, exposed : List ( String, String ) } }
 initialInput =
     { snippet = """import Json.Decode as Decode
+import Http
 
 
 findThis : Result Decode.Error a -> Result String a
@@ -157,8 +157,8 @@ inputToString input =
             )
 
 
-iterateWithPrompt : { model : String, history : List { badAttempt : String, errorMessage : String } } -> BackendTask FatalError (Result { badAttempt : String, errorMessage : String } ())
-iterateWithPrompt { model, history } =
+iterateWithPrompt : String -> { model : String, history : List { badAttempt : String, errorMessage : String } } -> BackendTask FatalError (Result { badAttempt : String, errorMessage : String } ())
+iterateWithPrompt targetModulePath { model, history } =
     Gpt.completions
         { model = model
         , systemMessage =
@@ -341,6 +341,7 @@ Output:
                                     BackendTask.Custom.run "testCompilation"
                                         (Encode.object
                                             [ ( "elmCode", Encode.string (okResponse |> List.NonEmpty.reverse |> List.NonEmpty.head |> .elmCode) )
+                                            , ( "targetModulePath", Encode.string targetModulePath )
                                             ]
                                         )
                                         (Decode.nullable Decode.string
@@ -392,14 +393,15 @@ logFormatted steps =
 run : Script
 run =
     Script.withCliOptions program
-        (\{ maxIterations, model } ->
-            reiterate [] model maxIterations
+        (\{ maxIterations, model, targetModulePath } ->
+            reiterate targetModulePath [] model maxIterations
         )
 
 
-reiterate : List { badAttempt : String, errorMessage : String } -> String -> Int -> BackendTask FatalError ()
-reiterate history model iterationsLeft =
+reiterate : String -> List { badAttempt : String, errorMessage : String } -> String -> Int -> BackendTask FatalError ()
+reiterate targetModulePath history model iterationsLeft =
     iterateWithPrompt
+        targetModulePath
         { model = model
         , history = history
         }
@@ -421,6 +423,7 @@ reiterate history model iterationsLeft =
                             |> BackendTask.andThen
                                 (\() ->
                                     iterateWithPrompt
+                                        targetModulePath
                                         { model = model
                                         , history = [ error ]
                                         }
@@ -441,6 +444,7 @@ reiterate history model iterationsLeft =
 
                                                         else
                                                             reiterate
+                                                                targetModulePath
                                                                 (error :: history)
                                                                 model
                                                                 (iterationsLeft - 1)
@@ -450,7 +454,8 @@ reiterate history model iterationsLeft =
 
 
 type alias CliOptions =
-    { maxIterations : Int
+    { targetModulePath : String
+    , maxIterations : Int
     , model : String
     }
 
@@ -460,6 +465,8 @@ program =
     Program.config
         |> Program.add
             (OptionsParser.build CliOptions
+                |> OptionsParser.with
+                    (Option.requiredPositionalArg "targetModulePath")
                 |> OptionsParser.with
                     (Option.optionalKeywordArg "iterations"
                         |> Option.withDefault "1"

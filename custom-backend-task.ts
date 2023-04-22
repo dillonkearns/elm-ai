@@ -1,22 +1,25 @@
 import { spawn } from "child_process";
 import * as fs from "fs";
 import * as path from "path";
+import { rewriteElmJson } from "./rewrite-elm-json.js";
 
-export async function testCompilation({ elmCode }) {
+export async function testCompilation({ targetModulePath, elmCode }) {
   await prepareHiddenDirectory();
-  const exampleModule = `module Example exposing (..)
-
-import Json.Decode as Decode exposing (Decoder)
-import Http
-
-
-${elmCode}
-`;
-  fs.writeFileSync("elm-stuff/elm-ai/src/Example.elm", exampleModule);
+  await rewriteElmJson("./elm.json", "./elm-stuff/elm-ai/elm.json");
+  let targetModuleContents = fs.readFileSync(targetModulePath, "utf-8");
+  targetModuleContents = targetModuleContents.replace(
+    /module .* exposing \(.*\)/,
+    "module ElmAiTypeSolver exposing (..)"
+  );
+  targetModuleContents += `\n\n${elmCode}`;
+  fs.writeFileSync(
+    "elm-stuff/elm-ai/.elm-ai/ElmAiTypeSolver.elm",
+    targetModuleContents
+  );
   return await new Promise((resolve) => {
     let testRun = spawn(
       "elm",
-      ["make", "src/Example.elm", "--output", "/dev/null"],
+      ["make", ".elm-ai/ElmAiTypeSolver.elm", "--output", "/dev/null"],
       {
         cwd: path.resolve("elm-stuff/elm-ai"),
         stdio: "inherit",
@@ -43,6 +46,7 @@ ${elmCode}
 async function prepareHiddenDirectory() {
   fs.mkdirSync("elm-stuff/elm-ai/tests", { recursive: true });
   fs.mkdirSync("elm-stuff/elm-ai/src", { recursive: true });
+  fs.mkdirSync("elm-stuff/elm-ai/.elm-ai", { recursive: true });
   fs.writeFileSync(
     "elm-stuff/elm-ai/elm.json",
     JSON.stringify({
@@ -155,3 +159,19 @@ export async function elmFormat(code) {
     testRun.stdin.end();
   });
 }
+
+/* 
+
+Steps:
+
+1. Take target Elm file and an elm.json root from user input
+2. Copy that elm.json to a hidden directory
+3. Copy the target Elm file to an extra source-directory in the hidden directory. Give the module a unique name that doesn't conflict.
+4. Run elm-review extractor to find ranges of code to run the TypeSolver for
+5. Pass the context from the elm-review extractor to the GPT TypeSolver
+6. Replace the output of the TypeSolver in the target Elm file
+7. Run `elm make` on the target Elm file in the hidden directory to check if it compiles
+8. Feed the errors back in and repeat from step 5 until the code compiles
+9. Print the solution for the user
+
+*/
