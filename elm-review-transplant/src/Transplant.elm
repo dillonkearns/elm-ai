@@ -12,8 +12,10 @@ import Elm.Syntax.ModuleName exposing (ModuleName)
 import Elm.Syntax.Node as Node exposing (Node)
 import Elm.Syntax.Range exposing (Range)
 import Elm.Syntax.TypeAnnotation exposing (TypeAnnotation)
+import Elm.Type
 import Elm.Writer
 import Json.Encode as Encode
+import Review.Project.Dependency
 import Review.Rule as Rule exposing (Rule)
 
 
@@ -63,9 +65,123 @@ rule =
             , fromModuleToProject = fromModuleToProject
             , foldProjectContexts = foldProjectContexts
             }
+        |> Rule.withDirectDependenciesProjectVisitor directDependenciesVisitor
         |> Rule.withFinalProjectEvaluation finalEvaluationForProject
         |> Rule.withDataExtractor dataExtractor
         |> Rule.fromProjectRuleSchema
+
+
+directDependenciesVisitor : Dict String Review.Project.Dependency.Dependency -> ProjectContext -> ( List asdf, ProjectContext )
+directDependenciesVisitor directDependencies previousContext =
+    let
+        bar : Dict String (List ( String, String ))
+        bar =
+            directDependencies
+                |> Dict.toList
+                |> List.concatMap
+                    (\( _, dependency ) ->
+                        {-
+                           { name : String
+                           , comment : String
+                           , unions : List Union
+                           , aliases : List Alias
+                           , values : List Value
+                           , binops : List Binop
+                           }
+
+                        -}
+                        Review.Project.Dependency.modules dependency
+                            |> List.map
+                                (\module_ ->
+                                    ( module_.name
+                                    , module_.values
+                                        |> List.map
+                                            (\value ->
+                                                ( value.name
+                                                , value.tipe
+                                                    |> typeToString
+                                                )
+                                            )
+                                    )
+                                )
+                    )
+                |> Dict.fromList
+    in
+    ( []
+    , { previousContext | dependencies = bar }
+    )
+
+
+typeToString : Elm.Type.Type -> String
+typeToString type_ =
+    {- Represent Elm types as values! Here are some examples:
+
+       Int            ==> Type "Int" []
+       a -> b         ==> Lambda (Var "a") (Var "b")
+       ( a, b )       ==> Tuple [ Var "a", Var "b" ]
+       Maybe a        ==> Type "Maybe" [ Var "a" ]
+       { x : Int }    ==> Record [("x", Type "Int" [])] Nothing
+       { r | x : a }  ==> Record [("x", Var "a")] (Just "r")
+
+    -}
+    case type_ of
+        Elm.Type.Var string ->
+            string
+
+        Elm.Type.Lambda type1 type2 ->
+            "(" ++ typeToString type1 ++ " -> " ++ typeToString type2 ++ ")"
+
+        Elm.Type.Tuple types ->
+            "(" ++ String.join ", " (List.map typeToString types) ++ ")"
+
+        Elm.Type.Type string types ->
+            cleanTypeName string ++ " " ++ String.join " " (List.map typeToString types)
+
+        Elm.Type.Record list maybeExtensibleParameter ->
+            "{ "
+                ++ (case maybeExtensibleParameter of
+                        Nothing ->
+                            ""
+
+                        Just string ->
+                            string ++ " | "
+                   )
+                ++ String.join ", " (List.map (\( string, innerType ) -> string ++ " : " ++ typeToString innerType) list)
+                ++ " }"
+
+
+cleanTypeName : String -> String
+cleanTypeName typeName =
+    case typeName of
+        "String.String" ->
+            "String"
+
+        "Char.Char" ->
+            "Char"
+
+        "Maybe.Maybe" ->
+            "Maybe"
+
+        "List.List" ->
+            "List"
+
+        "Result.Result" ->
+            "Result"
+
+        "Basics.Int" ->
+            "Int"
+
+        "Task.Task" ->
+            "Task"
+
+        "Basics.Never" ->
+            "Never"
+
+        "Basics.Bool" ->
+            "Bool"
+
+        _ ->
+            typeName
 
 
 moduleVisitor :
@@ -78,12 +194,14 @@ moduleVisitor schema =
 
 type alias ProjectContext =
     { targets : Dict ModuleName (List Target)
+    , dependencies : Dict String (List ( String, String ))
     }
 
 
 initialProjectContext : ProjectContext
 initialProjectContext =
     { targets = Dict.empty
+    , dependencies = Dict.empty
     }
 
 
@@ -96,6 +214,7 @@ fromProjectToModule moduleKey moduleName projectContext =
 fromModuleToProject : Rule.ModuleKey -> Node ModuleName -> ModuleContext -> ProjectContext
 fromModuleToProject moduleKey moduleName moduleContext =
     { targets = Dict.singleton (Node.value moduleName) moduleContext.todoTargets
+    , dependencies = Dict.empty
     }
 
 
@@ -108,6 +227,14 @@ foldProjectContexts newContext previousContext =
             (\key b -> Dict.insert key b)
             newContext.targets
             previousContext.targets
+            Dict.empty
+    , dependencies =
+        Dict.merge
+            (\key a -> Dict.insert key a)
+            (\key a b -> Dict.insert key (a ++ b))
+            (\key b -> Dict.insert key b)
+            newContext.dependencies
+            previousContext.dependencies
             Dict.empty
     }
 
@@ -160,32 +287,51 @@ expressionVisitor node context =
 
 dataExtractor : ProjectContext -> Encode.Value
 dataExtractor projectContext =
-    projectContext.targets
-        |> Dict.toList
-        |> List.map
-            (\( moduleName, targets ) ->
-                ( String.join "." moduleName
-                , Encode.list
-                    (\target ->
-                        Encode.object
-                            [ ( "row"
-                              , Encode.int target.range.start.column
-                              )
-                            , ( "column"
-                              , Encode.int target.range.start.column
-                              )
-                            , ( "type"
-                              , target.annotation
-                                    |> Elm.Writer.writeTypeAnnotation
-                                    |> Elm.Writer.write
-                                    |> Encode.string
-                              )
-                            ]
+    Encode.object
+        [ ( "targets"
+          , projectContext.targets
+                |> Dict.toList
+                |> List.map
+                    (\( moduleName, targets ) ->
+                        ( String.join "." moduleName
+                        , Encode.list
+                            (\target ->
+                                Encode.object
+                                    [ ( "row"
+                                      , Encode.int target.range.start.column
+                                      )
+                                    , ( "column"
+                                      , Encode.int target.range.start.column
+                                      )
+                                    , ( "type"
+                                      , target.annotation
+                                            |> Elm.Writer.writeTypeAnnotation
+                                            |> Elm.Writer.write
+                                            |> Encode.string
+                                      )
+                                    ]
+                            )
+                            targets
+                        )
                     )
-                    targets
+                |> Encode.object
+          )
+        , ( "dependencies"
+          , Encode.object
+                (List.map
+                    (\( key, value ) ->
+                        ( key
+                        , value
+                            |> List.map (Tuple.mapSecond Encode.string)
+                            |> Encode.object
+                        )
+                    )
+                    (Dict.toList
+                        projectContext.dependencies
+                    )
                 )
-            )
-        |> Encode.object
+          )
+        ]
 
 
 extractTypeIfReplaceTodo : Node Elm.Syntax.Expression.LetDeclaration -> Maybe Target
