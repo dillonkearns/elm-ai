@@ -318,13 +318,18 @@ dataExtractor projectContext =
           )
         , ( "dependencies"
           , Encode.object
-                (List.map
+                (List.filterMap
                     (\( key, value ) ->
-                        ( key
-                        , value
-                            |> List.map (Tuple.mapSecond Encode.string)
-                            |> Encode.object
-                        )
+                        if (key |> String.startsWith "Cli.") || key == "Result" || key == "String" || key == "Tuple" then
+                            Just
+                                ( key
+                                , value
+                                    |> List.map (Tuple.mapSecond Encode.string)
+                                    |> Encode.object
+                                )
+
+                        else
+                            Nothing
                     )
                     (Dict.toList
                         projectContext.dependencies

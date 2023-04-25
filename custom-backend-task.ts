@@ -160,6 +160,40 @@ export async function elmFormat(code) {
   });
 }
 
+export async function elmReview() {
+  return await new Promise((resolve, reject) => {
+    // elm-review --config ../elm-review-transplant/preview/ --extract --report=json | jq .extracts.NoUnusedExportedFunctions.dependencies
+    let testRun = spawn("elm-review", [
+      "--config",
+      "../elm-review-transplant/preview/",
+      "--extract",
+      "--report",
+      "json",
+    ]);
+    let output = "";
+    testRun.stdout.on("data", (data) => {
+      output += data;
+    });
+    testRun.stderr.on("data", (data) => {
+      output += data;
+    });
+    testRun.on("close", (code) => {
+      if (code === 0) {
+        resolve(JSON.parse(output));
+      } else {
+        reject(output);
+      }
+    });
+    testRun.on("exit", (code) => {
+      if (code === 0) {
+        resolve(JSON.parse(output));
+      } else {
+        reject(output);
+      }
+    });
+  });
+}
+
 /* 
 
 Steps:

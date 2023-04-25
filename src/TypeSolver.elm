@@ -50,40 +50,54 @@ stepsDecoder =
             )
 
 
-initialInput : { snippet : String, availableFunctions : List { moduleName : String, exposed : List ( String, String ) } }
-initialInput =
+initialInput : Decode.Value -> { snippet : String, availableFunctions : Encode.Value }
+initialInput dependencies =
     { snippet = """import Json.Decode as Decode
 import Http
+import Cli.Option
+import Cli.OptionsParser
+import Cli.Program
 
 
-findThis : Result Decode.Error a -> Result String a
+findThis : Cli.Program.Config ( String, Int )
 findThis =
     Debug.todo "REPLACE"
 """
-    , availableFunctions =
-        [ { moduleName = "Decode"
-          , exposed =
-                [ ( "string", "Decode.Decoder String" )
-                , ( "bool", "Decode.Decoder Bool" )
-                , ( "nullable", "Decode.Decoder a -> Decode.Decoder (Maybe a)" )
-                , ( "list", "Decode.Decoder a -> Decode.Decoder (List a)" )
-                , ( "array", "Decode.Decoder a -> Decode.Decoder (Array a)" )
-                , ( "decodeString", "Decode.Decoder a -> String -> Result Error a" )
-                , ( "decodeValue", "Decode.Decoder a -> Value -> Result Error a" )
-                , ( "errorToString", "Decode.Error -> String" )
-                ]
-          }
-        , { moduleName = "Result"
-          , exposed =
-                [ ( "map", "(a -> value) -> Result x a -> Result x value" )
-                , ( "andThen", "(a -> Result x b) -> Result x a -> Result x b" )
-                , ( "mapError", "(x -> y) -> Result x a -> Result y a" )
-                , ( "withDefault", "a -> Result x a -> a" )
-                , ( "toMaybe", "Result x a -> Maybe a" )
-                , ( "fromMaybe", "x -> Maybe a -> Result x a" )
-                ]
-          }
-        ]
+
+    --findThis : Result Decode.Error a -> Result String a
+    --findThis =
+    --    Debug.todo "REPLACE"
+    , availableFunctions = dependencies
+
+    --[ { moduleName = "Decode"
+    --  , exposed =
+    --        [ ( "string", "Decode.Decoder String" )
+    --        , ( "bool", "Decode.Decoder Bool" )
+    --        , ( "nullable", "Decode.Decoder a -> Decode.Decoder (Maybe a)" )
+    --        , ( "list", "Decode.Decoder a -> Decode.Decoder (List a)" )
+    --        , ( "array", "Decode.Decoder a -> Decode.Decoder (Array a)" )
+    --        , ( "decodeString", "Decode.Decoder a -> String -> Result Error a" )
+    --        , ( "decodeValue", "Decode.Decoder a -> Value -> Result Error a" )
+    --        , ( "errorToString", "Decode.Error -> String" )
+    --        ]
+    --  }
+    --, { moduleName = "Result"
+    --  , exposed =
+    --        [ ( "map", "(a -> value) -> Result x a -> Result x value" )
+    --        , ( "andThen", "(a -> Result x b) -> Result x a -> Result x b" )
+    --        , ( "mapError", "(x -> y) -> Result x a -> Result y a" )
+    --        , ( "withDefault", "a -> Result x a -> a" )
+    --        , ( "toMaybe", "Result x a -> Maybe a" )
+    --        , ( "fromMaybe", "x -> Maybe a -> Result x a" )
+    --        ]
+    --  }
+    --, { moduleName = ""
+    --  , exposed =
+    --        [ ( "myErrorToString", "MyError -> String" )
+    --        , ( "toMyError", "Http.Error -> MyError" )
+    --        ]
+    --  }
+    --]
     }
 
 
@@ -132,6 +146,13 @@ addTwo input int =
                 ]
           }
         ]
+            |> List.map
+                (\thisModule ->
+                    ( thisModule.moduleName
+                    , Encode.object (thisModule.exposed |> List.map (Tuple.mapSecond Encode.string))
+                    )
+                )
+            |> Encode.object
     }
 
 
@@ -143,22 +164,14 @@ inputToString input =
             0
             (Encode.object
                 [ ( "availableFunctions"
-                  , (input.availableFunctions
-                        |> List.map
-                            (\thisModule ->
-                                ( thisModule.moduleName
-                                , Encode.object (thisModule.exposed |> List.map (Tuple.mapSecond Encode.string))
-                                )
-                            )
-                    )
-                        |> Encode.object
+                  , input.availableFunctions
                   )
                 ]
             )
 
 
-iterateWithPrompt : String -> { model : String, history : List { badAttempt : String, errorMessage : String } } -> BackendTask FatalError (Result { badAttempt : String, errorMessage : String } ())
-iterateWithPrompt targetModulePath { model, history } =
+iterateWithPrompt : Decode.Value -> String -> { model : String, history : List { badAttempt : String, errorMessage : String } } -> BackendTask FatalError (Result { badAttempt : String, errorMessage : String } ())
+iterateWithPrompt dependencies targetModulePath { model, history } =
     Gpt.completions
         { model = model
         , systemMessage =
@@ -296,12 +309,19 @@ addTwo input int =
                    )
                 ++ """
 
-Following that same process with the following input.
+Follow that same process with the following input.
+
+Constraints:
+
+The solution must:
+
+- Use `Cli.Option.requiredPositionalArg "targetModulePath"`
+- Use `Cli.Option.optionalKeywordArg "iterations"`
 
 Input:
 
 """
-                ++ inputToString initialInput
+                ++ inputToString (initialInput dependencies)
                 ++ """
 
 Now, for your JSON output, remember that
@@ -394,13 +414,28 @@ run : Script
 run =
     Script.withCliOptions program
         (\{ maxIterations, model, targetModulePath } ->
-            reiterate targetModulePath [] model maxIterations
+            BackendTask.Custom.run "elmReview"
+                Encode.null
+                (Decode.at [ "extracts", "NoUnusedExportedFunctions", "dependencies" ]
+                    Decode.value
+                )
+                |> BackendTask.allowFatal
+                |> BackendTask.andThen
+                    (\dependencies ->
+                        reiterate
+                            dependencies
+                            targetModulePath
+                            []
+                            model
+                            maxIterations
+                    )
         )
 
 
-reiterate : String -> List { badAttempt : String, errorMessage : String } -> String -> Int -> BackendTask FatalError ()
-reiterate targetModulePath history model iterationsLeft =
+reiterate : Decode.Value -> String -> List { badAttempt : String, errorMessage : String } -> String -> Int -> BackendTask FatalError ()
+reiterate dependencies targetModulePath history model iterationsLeft =
     iterateWithPrompt
+        dependencies
         targetModulePath
         { model = model
         , history = history
@@ -423,6 +458,7 @@ reiterate targetModulePath history model iterationsLeft =
                             |> BackendTask.andThen
                                 (\() ->
                                     iterateWithPrompt
+                                        dependencies
                                         targetModulePath
                                         { model = model
                                         , history = [ error ]
@@ -444,6 +480,7 @@ reiterate targetModulePath history model iterationsLeft =
 
                                                         else
                                                             reiterate
+                                                                dependencies
                                                                 targetModulePath
                                                                 (error :: history)
                                                                 model
