@@ -83,7 +83,14 @@ async function prepareHiddenDirectory() {
 }
 
 export async function testDecoder({ sampleJson, solution, typeDefinition }) {
-  const { elmCode, decodedElmValue } = JSON.parse(solution);
+  const { decoders, decodedElmValue } = JSON.parse(solution);
+  const elmCode = `
+
+decoder : Decoder Pokemon
+decoder =
+    Decode.succeed Pokemon
+    ${decoders.map((decoder) => `    |> andMap (${decoder})`).join("\n")}
+`;
   // generate an Elm test file and run it using elm-test
   await prepareHiddenDirectory();
   const elmTestModule = `module DecoderTest exposing (all)
@@ -141,18 +148,19 @@ export async function elmFormat(code) {
     testRun.stderr.on("data", (data) => {
       output += data;
     });
-    testRun.on("close", (code) => {
-      if (code === 0) {
+    testRun.on("close", (exitCode) => {
+      if (exitCode === 0) {
         resolve(output);
       } else {
         reject(output);
       }
     });
-    testRun.on("exit", (code) => {
-      if (code === 0) {
+    testRun.on("exit", (exitCode) => {
+      if (exitCode === 0) {
         resolve(output);
       } else {
-        reject(output);
+        console.warn("Invalid Elm code, skipping formatting...");
+        resolve(code);
       }
     });
     testRun.stdin.write(code);

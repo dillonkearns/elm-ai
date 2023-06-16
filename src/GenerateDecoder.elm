@@ -39,11 +39,7 @@ produce exactly the expected value that the sample JSON input decodes into. If i
 will be given for you to fix them until the solution successfully yields the expected output on the sample JSON.
 
 - Do NOT include the type definition in your solution. Only your Decoder definition.
-- Use the provided function `andMap` for every given field in the record type definition.
-- Never refer to `Decode.andMap`, this function does not exist.
-- DO refer to `andMap`, this function exists and is in scope.
-
-The name of the top-level JSON Decoder in your solution must be `decoder`.
+- The `decoders` field in your JSON response must have the same number of elements as the number of fields in the target type.
 
 Decode a JSON object into a record type:
 
@@ -61,17 +57,12 @@ Solution attempt:
 """
                 ++ Encode.encode 0
                     (Encode.object
-                        [ ( "elmCode"
-                          , Encode.string
-                                """import Json.Decode as Decode
-
-decoder : Decoder Repo
-decoder =
-    Decode.succeed Repo
-        |> andMap (Decode.field "stargazers_count" Decode.int)
-        |> andMap (Decode.field "owner" Decode.string)
-        |> andMap (Decode.field "name" Decode.string)
-                                            """
+                        [ ( "decoders"
+                          , Encode.list Encode.string
+                                [ """Decode.field "stargazers_count" Decode.int"""
+                                , """Decode.field "owner" Decode.string"""
+                                , """Decode.field "name" Decode.string"""
+                                ]
                           )
                         , ( "decodedElmValue"
                           , Encode.string
@@ -113,17 +104,12 @@ Failed:   1
                     """
                 ++ Encode.encode 0
                     (Encode.object
-                        [ ( "elmCode"
-                          , Encode.string
-                                """import Json.Decode as Decode
-
-decoder : Decoder Repo
-decoder =
-    Decode.succeed Repo
-        |> andMap (Decode.field "stargazers_count" Decode.int)
-        |> andMap (Decode.field "user" (Decode.field "owner" Decode.string) )
-        |> andMap (Decode.field "user" ( Decode.field "name" Decode.string) )
-"""
+                        [ ( "decoders"
+                          , Encode.list Encode.string
+                                [ """Decode.field "stargazers_count" Decode.int"""
+                                , """Decode.field "user" (Decode.field "owner" Decode.string)"""
+                                , """Decode.field "user" (Decode.field "name" Decode.string)"""
+                                ]
                           )
                         , ( "decodedElmValue"
                           , Encode.string
@@ -260,7 +246,33 @@ type alias Response =
 responseDecoder : Decode.Decoder Response
 responseDecoder =
     Decode.map3 Response
-        (Decode.field "elmCode" Decode.string)
+        (Decode.field "decoders" (Decode.list Decode.string)
+            |> Decode.map
+                (\decoders ->
+                    let
+                        constructorName : String
+                        constructorName =
+                            "Pokemon"
+                    in
+                    """
+import Json.Decode as Decode
+
+decoder : Decoder """
+                        ++ constructorName
+                        ++ """
+decoder =
+    Decode.succeed """
+                        ++ constructorName
+                        ++ "\n"
+                        ++ (List.map
+                                (\decoder ->
+                                    "    |> andMap (" ++ decoder ++ ")"
+                                )
+                                decoders
+                                |> String.join "\n"
+                           )
+                )
+        )
         (Decode.field "decodedElmValue" Decode.string)
         (Decode.maybe (Decode.field "attemptExplanation" Decode.string))
 
