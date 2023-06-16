@@ -59,9 +59,9 @@ import Cli.OptionsParser
 import Cli.Program
 
 
-findThis : Cli.Program.Config ( String, Int )
-findThis =
-    Debug.todo "REPLACE"
+findThis : List String -> Result String String
+findThis userStringInputs =
+    Debug.todo ""
 """
 
     --findThis : Result Decode.Error a -> Result String a
@@ -175,12 +175,27 @@ iterateWithPrompt dependencies targetModulePath { model, history } =
     Gpt.completions
         { model = model
         , systemMessage =
-            """Your goal is the following:
+            """You are an Elm developer assistant. Your job is to find a way to compose functions together into a value of the desired Elm type. You are precise and respond with JSON.
                
 - You will be given some Elm module which contains `(Debug.todo "REPLACE")`.
 - The Elm code is in a compiling state (no compiler errors). HOWEVER, you are to replace `(Debug.todo "REPLACE")` in the input code with something that has the correct type and compiles.
 
 `Debug.todo` in Elm is a special value which has any value (it could even be a function). But because the program compiles, we know that some valid code exists which will satisfy the Elm types. Your job is to find that code.
+
+In order to get the correct type, you will be given a list of the available top-level values and functions.
+
+In order to break the problem down, you are encouraged to break the problem into sub-problems. You will return a JSON array with the sub-problems.
+
+Those sub-problems should be valid Elm code, and each sub-problem is an opportunity for more fine-grained compiler feedback.
+
+
+
+--------------------------------------------
+
+
+
+
+Your solution should combine those values to give valid types. You are encouraged to combine those into sub problems and show the types of each of the results from the sub problems as you build up towards the desired type.
 
 - Do not change any code other than `(Debug.todo "REPLACE")` in ANY of the steps (including the final solution)
 - You are encouraged to break the problem down into sub-problems. These sub-problems could even use `(Debug.todo "REPLACEME")`, however your sub-problem should progress towards a solution so your next steps will eventually get rid of any references to `Debug.todo` (it should not appear at all in the final code)
@@ -519,3 +534,11 @@ program =
                             ]
                     )
             )
+
+
+simpleExample =
+    [ { explanation = "First, we need to get the input into a format that we can work with. We can do this by using the `String.toInt` function."
+      , annotation = ""
+      , body = Nothing
+      }
+    ]
