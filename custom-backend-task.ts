@@ -83,13 +83,20 @@ async function prepareHiddenDirectory() {
 }
 
 export async function testDecoder({ sampleJson, solution, typeDefinition }) {
-  const { decoders, decodedElmValue } = JSON.parse(solution);
+  const { decoders } = JSON.parse(solution);
+  const decodedElmValue = `{${decoders
+    .map(
+      ([fieldName, decoder, expectedValue]) => `${fieldName} = ${expectedValue}`
+    )
+    .join(", ")}}`;
   const elmCode = `
 
 decoder : Decoder Pokemon
 decoder =
     Decode.succeed Pokemon
-    ${decoders.map((decoder) => `    |> andMap (${decoder})`).join("\n")}
+    ${decoders
+      .map(([_a, decoder, _b]) => `    |> andMap (${decoder})`)
+      .join("\n")}
 `;
   // generate an Elm test file and run it using elm-test
   await prepareHiddenDirectory();

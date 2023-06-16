@@ -28,10 +28,14 @@ You will be given the following inputs:
 1. The type you are decoding into.
 2. One or more examples of the JSON you are decoding.
 
-You will give the following outputs as a JSON response:
+Your response will be strictly JSON formatted data. It will include two top-level JSON fields:
 
-1. The Elm code to decode the JSON into the given type.
-2. The exact Elm value that the JSON sample will decode into (the first sample if there is more than one).
+- `decoders`: An array of decoders, corresponding to the fields in the target type with the exact same order. Each element in the `decoders` array must be an array with exactly 3 elements:
+    1. The name of the field in the target type (in the same order as it was declared in the target type).
+    2. The Elm code to decode the JSON into the given type.
+    3. The exact Elm value that the JSON sample will decode into (the first sample if there is more than one).
+- `attemptExplanation`: A string explaining the reasoning behind the solution attempt.
+
 
 The purpose of this task is to automate generating a JSON Decoder, and this will be tested by executing the Decoder from your
 solution on the sample JSON input. Therefore the Decoder must handle the exact shape of the sample JSON input, and it must
@@ -56,23 +60,15 @@ Example JSON:
 Solution attempt:
 """
                 ++ Encode.encode 0
-                    (Encode.object
-                        [ ( "decoders"
-                          , Encode.list Encode.string
-                                [ """Decode.field "stargazers_count" Decode.int"""
-                                , """Decode.field "owner" Decode.string"""
-                                , """Decode.field "name" Decode.string"""
-                                ]
-                          )
-                        , ( "decodedElmValue"
-                          , Encode.string
-                                """{ stars = 575, owner = "dillonkearns", name = "elm-pages" }"""
-                          )
-                        , ( "attemptExplanation"
-                          , Encode.string
-                                """This is the first attempt. It appears that the field `stars` in the target Elm type refers to the JSON property `stargazers_count` in the sample JSON input. Otherwise we are directly retrieving the other JSON properties."""
-                          )
-                        ]
+                    (encodeResponse
+                        { decoders =
+                            [ ( "stars", """Decode.field "stargazers_count" Decode.int""", "575" )
+                            , ( "owner", """Decode.field "owner" Decode.string""", "\"dillonkearns\"" )
+                            , ( "name", """Decode.field "name" Decode.string""", "\"elm-pages\"" )
+                            ]
+                        , explanation =
+                            """This is the first attempt. It appears that the field `stars` in the target Elm type refers to the JSON property `stargazers_count` in the sample JSON input. Otherwise we are directly retrieving the other JSON properties."""
+                        }
                     )
                 ++ """
 
@@ -103,23 +99,14 @@ Passed:   0
 Failed:   1
                     """
                 ++ Encode.encode 0
-                    (Encode.object
-                        [ ( "decoders"
-                          , Encode.list Encode.string
-                                [ """Decode.field "stargazers_count" Decode.int"""
-                                , """Decode.field "user" (Decode.field "owner" Decode.string)"""
-                                , """Decode.field "user" (Decode.field "name" Decode.string)"""
-                                ]
-                          )
-                        , ( "decodedElmValue"
-                          , Encode.string
-                                """{ stars = 575, owner = "dillonkearns", name = "elm-pages" }"""
-                          )
-                        , ( "attemptExplanation"
-                          , Encode.string
-                                """The previous attempt failed because the JSON properties `owner` and `name` are nested under `user`. In order to attempt to fix this problem, this solution changes the decoder definition. It uses `Decode.field "user" to match the nesting of the JSON."""
-                          )
-                        ]
+                    (encodeResponse
+                        { decoders =
+                            [ ( "stars", """Decode.field "stargazers_count" Decode.int""", "575" )
+                            , ( "owner", """Decode.field "user" (Decode.field "owner" Decode.string)""", "\"dillonkearns\"" )
+                            , ( "name", """Decode.field "user" (Decode.field "name" Decode.string)""", "\"elm-pages\"" )
+                            ]
+                        , explanation = """The previous attempt failed because the JSON properties `owner` and `name` are nested under `user`. In order to attempt to fix this problem, this solution changes the decoder definition. It uses `Decode.field "user" to match the nesting of the JSON."""
+                        }
                     )
         , userMessage =
             """
@@ -243,10 +230,24 @@ type alias Response =
     }
 
 
+type alias Entry =
+    { fieldName : String
+    , decoder : String
+    , expectedValue : String
+    }
+
+
 responseDecoder : Decode.Decoder Response
 responseDecoder =
-    Decode.map3 Response
-        (Decode.field "decoders" (Decode.list Decode.string)
+    Decode.map2 (\( decoders, expected ) explanation -> Response decoders expected explanation)
+        (Decode.field "decoders"
+            (Decode.list
+                (Decode.succeed Entry
+                    |> andMap (Decode.index 0 Decode.string)
+                    |> andMap (Decode.index 1 Decode.string)
+                    |> andMap (Decode.index 2 Decode.string)
+                )
+            )
             |> Decode.map
                 (\decoders ->
                     let
@@ -254,7 +255,7 @@ responseDecoder =
                         constructorName =
                             "Pokemon"
                     in
-                    """
+                    ( """
 import Json.Decode as Decode
 
 decoder : Decoder """
@@ -266,14 +267,20 @@ decoder =
                         ++ "\n"
                         ++ (List.map
                                 (\decoder ->
-                                    "    |> andMap (" ++ decoder ++ ")"
+                                    "    |> andMap (" ++ decoder.decoder ++ ")"
                                 )
                                 decoders
                                 |> String.join "\n"
                            )
+                    , "{ "
+                        ++ (decoders
+                                |> List.map (\decoder -> decoder.fieldName ++ " = " ++ decoder.expectedValue)
+                                |> String.join ", "
+                           )
+                        ++ " }"
+                    )
                 )
         )
-        (Decode.field "decodedElmValue" Decode.string)
         (Decode.maybe (Decode.field "attemptExplanation" Decode.string))
 
 
@@ -368,3 +375,20 @@ program =
                             ]
                     )
             )
+
+
+encodeResponse : { decoders : List ( String, String, String ), explanation : String } -> Encode.Value
+encodeResponse input =
+    Encode.object
+        [ ( "decoders"
+          , Encode.list (\( a, b, c ) -> Encode.list identity [ Encode.string a, Encode.string b, Encode.string c ]) input.decoders
+          )
+        , ( "attemptExplanation"
+          , Encode.string input.explanation
+          )
+        ]
+
+
+andMap : Decode.Decoder a -> Decode.Decoder (a -> b) -> Decode.Decoder b
+andMap =
+    Decode.map2 (|>)
