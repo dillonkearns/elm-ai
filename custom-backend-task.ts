@@ -3,33 +3,61 @@ import * as fs from "fs";
 import * as path from "path";
 import { rewriteElmJson } from "./rewrite-elm-json.js";
 
-export async function testCompilation({ targetModulePath, elmCode }) {
+type Guess = { name: string; annotation: string; body: string };
+
+export async function testCompilation({
+  targetModulePath,
+  guesses,
+}: {
+  targetModulePath: string;
+  guesses: Guess[];
+}) {
   await prepareHiddenDirectory();
   await rewriteElmJson("./elm.json", "./elm-stuff/elm-ai/elm.json");
-  let targetModuleContents = fs.readFileSync(targetModulePath, "utf-8");
-  targetModuleContents = targetModuleContents.replace(
-    /module .* exposing \(.*\)/,
-    "module ElmAiTypeSolver exposing (..)"
-  );
-  targetModuleContents += `\n\n${elmCode}`;
+  let originalModule = fs.readFileSync(targetModulePath, "utf-8");
+  let badGuesses = [];
+  for (const guess of guesses) {
+    let stubs = guesses
+      .map((stub) => {
+        if (guess === stub) {
+          return "";
+        } else {
+          return `${stub.name} : ${stub.annotation}\n${stub.name} = Debug.todo ""`;
+        }
+      })
+      .join("\n");
+    let targetModuleContents = "";
+    targetModuleContents = originalModule.replace(
+      /module .* exposing \(.*\)/,
+      "module ElmAiTypeSolver exposing (..)"
+    );
+    targetModuleContents += `\n\nexample : ${guess.annotation}\nexample = ${guess.body}`;
+    const response = await tryGuess(targetModuleContents);
+    if (response) {
+      badGuesses.push({ ...guess, error: response });
+    }
+  }
+  return badGuesses;
+}
+
+function tryGuess(targetModuleContents: string) {
   fs.writeFileSync(
     "elm-stuff/elm-ai/.elm-ai/ElmAiTypeSolver.elm",
     targetModuleContents
   );
-  return await new Promise((resolve) => {
+  return new Promise((resolve) => {
     let testRun = spawn(
       "elm",
       ["make", ".elm-ai/ElmAiTypeSolver.elm", "--output", "/dev/null"],
       {
         cwd: path.resolve("elm-stuff/elm-ai"),
-        stdio: "inherit",
       }
     );
     let output = "";
-    testRun.stderr?.on("data", (data) => {
+    testRun.stderr.on("data", (data) => {
       output += data;
     });
-    testRun.stdout?.on("data", (data) => {
+    testRun.stdout.on("data", (data) => {
       output += data;
     });
 

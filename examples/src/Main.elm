@@ -20,3 +20,7 @@ myErrorToString myError =
 toMyError : Http.Error -> MyError
 toMyError error =
     MyError
+
+example : Float -> Int
+example myFloat =
+    Debug.todo "REPLACE"
