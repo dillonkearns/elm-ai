@@ -368,10 +368,10 @@ program =
                 |> OptionsParser.with
                     (Option.optionalKeywordArg "model"
                         |> Option.withDefault "gpt-4"
-                        |> Option.oneOf "gpt-4"
+                        |> Option.oneOf "turbo"
                             [ ( "gpt-4", "gpt-4" )
                             , ( "gpt-3.5-turbo", "gpt-3.5-turbo" )
-                            , ( "turbo", "gpt-3.5-turbo-16k" )
+                            , ( "turbo", "gpt-4-turbo-preview" )
                             ]
                     )
             )
