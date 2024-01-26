@@ -42,6 +42,7 @@ completions { systemMessage, userMessage, history, model } =
                         BackendTask.Http.jsonBody
                             (Encode.object
                                 [ ( "model", Encode.string model )
+                                , ( "response_format", Encode.object [ ( "type", Encode.string "json_object" ) ] )
                                 , ( "messages"
                                   , Encode.list identity
                                         ([ --Encode.object
