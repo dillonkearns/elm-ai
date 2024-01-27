@@ -253,7 +253,7 @@ responseDecoder =
                     let
                         constructorName : String
                         constructorName =
-                            "Pokemon"
+                            "Post"
                     in
                     ( """
 import Json.Decode as Decode

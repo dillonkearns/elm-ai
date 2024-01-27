@@ -31,7 +31,7 @@ export async function testCompilation({
       /module .* exposing \(.*\)/,
       "module ElmAiTypeSolver exposing (..)"
     );
-    targetModuleContents += `\n\nexample : ${guess.annotation}\nexample = ${guess.body}`;
+    targetModuleContents += `\n\n${guess.name} : ${guess.annotation}\n${guess.name} = ${guess.body}\n\n${stubs}`;
     const response = await tryGuess(targetModuleContents);
     if (response) {
       badGuesses.push({ ...guess, error: response });
@@ -119,9 +119,9 @@ export async function testDecoder({ sampleJson, solution, typeDefinition }) {
     .join(", ")}}`;
   const elmCode = `
 
-decoder : Decoder Pokemon
+decoder : Decoder Post
 decoder =
-    Decode.succeed Pokemon
+    Decode.succeed Post
     ${decoders
       .map(([_a, decoder, _b]) => `    |> andMap (${decoder})`)
       .join("\n")}
